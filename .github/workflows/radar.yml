@@ -24,19 +24,45 @@ jobs:
               req=urllib.request.Request(url,headers={'Authorization':'Bearer '+TOK,'User-Agent':'radar','Accept':'application/vnd.github+json'})
               return json.load(urllib.request.urlopen(req,timeout=30))
           today=datetime.date.today()
-          def search(days,minstars):
-              since=(today-datetime.timedelta(days=days)).isoformat()
+          D1=(today-datetime.timedelta(days=1)).isoformat()
+          D7=(today-datetime.timedelta(days=7)).isoformat()
+          D30=(today-datetime.timedelta(days=30)).isoformat()
+          D90=(today-datetime.timedelta(days=90)).isoformat()
+          def s(q):
               try:
-                  d=api('https://api.github.com/search/repositories?q=created:'+str(since)+'+stars:' + str(minstars) + '&sort=stars&order=desc&per_page=25')
+                  d=api('https://api.github.com/search/repositories?q='+q+'&sort=stars&order=desc&per_page=100')
                   return [{'r':i['full_name'],'d':(i['description'] or '')[:120],'s':i['stargazers_count'],'l':i['language'] or '','f':i['forks_count'],'i':i['open_issues_count'],'u':i['html_url']} for i in d.get('items',[])]
               except Exception as e:
-                  print('search failed',e); return []
-          daily=search(1,30); weekly=search(7,80)
+                  print('search failed',q,e); return []
+          T='created:>'+D30+'+stars:>=100+'
+          boards={
+           'daily':  s('created:>'+D1+'+stars:>=1'),
+           'weekly': s('created:>'+D7+'+stars:>=1'),
+           'monthly':s('created:>'+D30+'+stars:>=100'),
+           'hot':    s('stars:>40000'),
+           'kilostar':s('created:>'+D30+'+stars:>=1000'),
+           'active': s('pushed:>'+D7+'+stars:>2000'),
+           'gem':    s('created:>'+D90+'+stars:500..2000'),
+           'python': s(T+'language:Python'),
+           'javascript': s(T+'language:JavaScript'),
+           'typescript': s(T+'language:TypeScript'),
+           'go':     s(T+'language:Go'),
+           'rust':   s(T+'language:Rust'),
+           'java':   s(T+'language:Java'),
+           'swift':  s(T+'language:Swift'),
+           'ai':     s('created:>'+D30+'+stars:>=50+topic:ai'),
+           'security': s('created:>'+D30+'+stars:>=50+topic:security'),
+           'database': s('created:>'+D30+'+stars:>=50+topic:database'),
+           'devops': s('created:>'+D30+'+stars:>=50+topic:devops'),
+           'gamedev': s('created:>'+D30+'+stars:>=50+topic:gamedev'),
+           'tutorial': s('created:>'+D30+'+stars:>=50+topic:awesome'),
+          }
+          KEYS=['daily','weekly','monthly','hot','kilostar','active','gem','python','javascript','typescript','go','rust','java','swift','ai','security','database','devops','gamedev','tutorial']
           prev={}
           if os.path.exists('snapshot-current.json'):
               old=json.load(open('snapshot-current.json'))
-              for i,repo in enumerate(old.get('daily',[])): prev[repo['r']]=(i,'daily')
-              for i,repo in enumerate(old.get('weekly',[])): prev[repo['r']]=(i,'weekly')
+              for k in KEYS:
+                  for i,repo in enumerate(old.get(k,[])): prev[repo['r']]=(i,k)
           def annotate(lst,key):
               names=[r['r'] for r in lst]
               for i,repo in enumerate(lst):
@@ -44,14 +70,15 @@ jobs:
                       oi,ok=prev[repo['r']]
                       repo['c']=['up' if i<oi else 'down' if i>oi else 'flat',i-oi] if ok==key else ['new',0]
                   else: repo['c']=['new',0]
-              return lst+[{'r':r,'c':['out',0]} for r in prev if r not in names]
-          daily=annotate(daily,'daily'); weekly=annotate(weekly,'weekly')
+              return lst+[{'r':r,'c':['out',0]} for r,(oi,ok) in prev.items() if ok==key and r not in names]
+          for k in KEYS: boards[k]=annotate(boards[k],k)
           mirrors=['https://ghproxy.net/','https://gh-proxy.com/','https://github.com/']
-          idx={'updated':datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC'),'mirrors':mirrors,'daily':daily,'weekly':weekly}
+          idx={'updated':datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC'),'mirrors':mirrors}
+          idx.update({k:boards[k] for k in KEYS})
           json.dump(idx,open('index.json','w'),ensure_ascii=False)
           if os.path.exists('snapshot-current.json'): shutil.copy('snapshot-current.json','snapshot-prev.json')
           json.dump(idx,open('snapshot-current.json','w'),ensure_ascii=False)
-          print('daily',len(daily),'weekly',len(weekly))
+          print(' '.join(k+':'+str(len(boards[k])) for k in KEYS))
           PYEOF
       - name: commit
         env:
