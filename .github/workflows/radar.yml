@@ -18,7 +18,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           python3 - <<'PYEOF'
-          import json,os,urllib.request,datetime,shutil
+          import json,os,urllib.request,urllib.parse,datetime,shutil,time
           TOK=os.environ.get('GH_TOKEN','')
           def api(url):
               req=urllib.request.Request(url,headers={'Authorization':'Bearer '+TOK,'User-Agent':'radar','Accept':'application/vnd.github+json'})
@@ -58,6 +58,34 @@ jobs:
            'tutorial': s('created:>'+D30+'+stars:>=50+topic:awesome'),
           }
           KEYS=['daily','weekly','monthly','hot','kilostar','active','gem','python','javascript','typescript','go','rust','java','swift','ai','security','database','devops','gamedev','tutorial']
+          # ---------- 中文翻译（带缓存，每个仓库只翻一次） ----------
+          cache={}
+          if os.path.exists('trans-cache.json'):
+              try: cache=json.load(open('trans-cache.json'))
+              except Exception: pass
+          def tr(text):
+              try:
+                  u='https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q='+urllib.parse.quote(text)
+                  rq=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'})
+                  r=json.load(urllib.request.urlopen(rq,timeout=15))
+                  out=''.join(x[0] for x in r[0] if x and x[0]).strip()
+                  return out or None
+              except Exception as e:
+                  print('tr fail',e); return None
+          seen=set(); newcnt=0
+          for k in KEYS:
+              for rr in boards[k]:
+                  if rr['r'] in seen: continue
+                  seen.add(rr['r'])
+                  if not rr.get('d'): continue
+                  if rr['r'] in cache:
+                      rr['d']=cache[rr['r']]; continue
+                  t=tr(rr['d'])
+                  if t:
+                      cache[rr['r']]=t; rr['d']=t[:120]; newcnt+=1; time.sleep(0.15)
+          json.dump(cache,open('trans-cache.json','w'),ensure_ascii=False)
+          print('translated new:',newcnt,'cached:',len(cache))
+          # ---------- 排名标注 ----------
           prev={}
           if os.path.exists('snapshot-current.json'):
               old=json.load(open('snapshot-current.json'))
